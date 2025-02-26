@@ -1,5 +1,6 @@
 from .Anthropic         import Anthropic
 from .BingCreateImages  import BingCreateImages
+from .CablyAI           import CablyAI
 from .Cerebras          import Cerebras
 from .CopilotAccount    import CopilotAccount
 from .Custom            import Custom
@@ -13,9 +14,6 @@ from .GigaChat          import GigaChat
 from .GithubCopilot     import GithubCopilot
 from .GlhfChat          import GlhfChat
 from .Groq              import Groq
-from .HuggingChat       import HuggingChat
-from .HuggingFace       import HuggingFace
-from .HuggingFaceAPI    import HuggingFaceAPI
 from .MetaAI            import MetaAI
 from .MetaAIAccount     import MetaAIAccount
 from .MicrosoftDesigner import MicrosoftDesigner

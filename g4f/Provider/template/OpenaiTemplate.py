@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import json
-import time
 import requests
 
-from ..helper import filter_none
+from ..helper import filter_none, format_image_prompt
 from ..base_provider import AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
 from ...typing import Union, Optional, AsyncResult, Messages, ImagesType
 from ...requests import StreamSession, raise_for_status
-from ...providers.response import FinishReason, ToolCalls, Usage, Reasoning, ImageResponse
+from ...providers.response import FinishReason, ToolCalls, Usage, ImageResponse
 from ...errors import MissingAuthError, ResponseError
 from ...image import to_data_uri
 from ... import debug
 
 class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin):
     api_base = ""
+    api_key = None
     supports_message_history = True
     supports_system_message = True
     default_model = ""
@@ -29,6 +29,8 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
                 headers = {}
                 if api_base is None:
                     api_base = cls.api_base
+                if api_key is None and cls.api_key is not None:
+                    api_key = cls.api_key
                 if api_key is not None:
                     headers["authorization"] = f"Bearer {api_key}"
                 response = requests.get(f"{api_base}/models", headers=headers, verify=cls.ssl)
@@ -40,7 +42,7 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
                 if cls.sort_models:
                     cls.models.sort()
             except Exception as e:
-                debug.log(e)
+                debug.error(e)
                 return cls.fallback_models
         return cls.models
 
@@ -63,10 +65,12 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
         prompt: str = None,
         headers: dict = None,
         impersonate: str = None,
-        tools: Optional[list] = None,
+        extra_parameters: list[str] = ["tools", "parallel_tool_calls", "tool_choice", "reasoning_effort", "logit_bias"],
         extra_data: dict = {},
         **kwargs
     ) -> AsyncResult:
+        if api_key is None and cls.api_key is not None:
+            api_key = cls.api_key
         if cls.needs_auth and api_key is None:
             raise MissingAuthError('Add a "api_key"')
         async with StreamSession(
@@ -81,8 +85,9 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
 
             # Proxy for image generation feature
             if model and model in cls.image_models:
+                prompt = format_image_prompt(messages, prompt)
                 data = {
-                    "prompt": messages[-1]["content"] if prompt is None else prompt,
+                    "prompt": prompt,
                     "model": model,
                 }
                 async with session.post(f"{api_base.rstrip('/')}/images/generations", json=data, ssl=cls.ssl) as response:
@@ -107,6 +112,7 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
                     }
                 ]
                 messages[-1] = last_message
+            extra_parameters = {key: kwargs[key] for key in extra_parameters if key in kwargs}
             data = filter_none(
                 messages=messages,
                 model=model,
@@ -115,7 +121,7 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
                 top_p=top_p,
                 stop=stop,
                 stream=stream,
-                tools=tools,
+                **extra_parameters,
                 **extra_data
             )
             if api_endpoint is None:
@@ -154,17 +160,7 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
                                     delta = delta.lstrip()
                                 if delta:
                                     first = False
-                                    if is_thinking:
-                                        if "</think>" in delta:
-                                            yield Reasoning(None, f"Finished in {round(time.time()-is_thinking, 2)} seconds")
-                                            is_thinking = 0
-                                        else:
-                                            yield Reasoning(delta)
-                                    elif "<think>" in delta:
-                                        is_thinking = time.time()
-                                        yield Reasoning(None, "Is thinking...")
-                                    else:
-                                        yield delta
+                                    yield delta
                             if "usage" in data and data["usage"]:
                                 yield Usage(**data["usage"])
                             if "finish_reason" in choice and choice["finish_reason"] is not None:
